@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Mini-Quest</title>
+  <meta name="description" content="Juego de tablero de mazmorras para 1-4 jugadores">
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#241f2e">
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Mini-Quest">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+</head>
+<body>
+
+  <!-- Configuración de partida -->
+  <div id="setup" class="hidden"></div>
+
+  <!-- UI del juego -->
+  <div id="game-ui" class="hidden">
+    <div id="topbar">
+      <img id="hud-portrait" src="img/token_barbaro.png" alt="">
+      <span id="hud-name"></span>
+      <span id="hud-hp"></span>
+      <span id="hud-gold"></span>
+      <span id="hud-items"></span>
+      <button id="btn-zoom" class="btn">🗺️</button>
+    </div>
+    <div id="viewport">
+      <div id="camera">
+        <div id="board"></div>
+        <div id="tokens"></div>
+      </div>
+      <!-- Barra de confirmación (no oscurece el tablero) -->
+      <div id="confirm-bar" class="hidden">
+        <div class="confirm-card">
+          <div id="confirm-text"></div>
+          <div id="confirm-buttons"></div>
+        </div>
+      </div>
+    </div>
+    <div id="actions"></div>
+  </div>
+
+  <!-- Menú de acciones (popup centrado) -->
+  <div id="action-popup" class="overlay hidden">
+    <div id="action-popup-buttons"></div>
+  </div>
+
+  <!-- Mensajes / confirmaciones -->
+  <div id="msg-overlay" class="overlay hidden">
+    <div id="msg-text"></div>
+    <div id="msg-buttons"></div>
+  </div>
+
+  <!-- Dados -->
+  <div id="dice-overlay" class="overlay hidden">
+    <div id="dice-title"></div>
+    <div id="dice-box"></div>
+    <div id="dice-hint"></div>
+    <div id="dice-total"></div>
+    <button id="dice-roll" class="btn primary big hidden">🎲 ¡Tirar!</button>
+    <button id="dice-continue" class="btn primary hidden">Continuar</button>
+  </div>
+
+  <!-- Combate -->
+  <div id="combat-overlay" class="overlay hidden">
+    <div id="combat-panel">
+      <div class="combat-side" id="combat-att-side">
+        <div class="portrait-wrap"><img id="combat-att-img" src="" alt=""></div>
+        <span id="combat-att-name"></span>
+        <div class="hpbar"><div id="combat-att-hp" class="hpfill"></div><span id="combat-att-hptext" class="hptext"></span></div>
+      </div>
+      <span id="combat-vs">VS</span>
+      <div class="combat-side" id="combat-def-side">
+        <div class="portrait-wrap">
+          <img id="combat-def-img" src="" alt="">
+          <div id="combat-badge"></div>
+        </div>
+        <span id="combat-def-name"></span>
+        <div class="hpbar"><div id="combat-def-hp" class="hpfill"></div><span id="combat-def-hptext" class="hptext"></span></div>
+      </div>
+    </div>
+    <div id="combat-dice"></div>
+    <div id="combat-hint"></div>
+    <button id="combat-roll" class="btn primary big hidden">🎲 ¡Tirar!</button>
+    <div id="combat-result"></div>
+    <button id="combat-continue" class="btn primary hidden">Continuar</button>
+  </div>
+
+  <!-- Fin de partida -->
+  <div id="end-overlay" class="overlay hidden">
+    <h1 id="end-title"></h1>
+    <div id="end-text"></div>
+    <button id="end-restart" class="btn primary big">Jugar otra vez</button>
+  </div>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/dungeon.js"></script>
+  <script src="js/dice.js"></script>
+  <script src="js/game.js"></script>
+  <script>
+    if ("serviceWorker" in navigator)
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+  </script>
+</body>
+</html>

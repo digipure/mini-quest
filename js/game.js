@@ -275,6 +275,7 @@ const Game = (() => {
   // ---- gestos: pinch-zoom + arrastre del tablero + tap sobre casilla ----
   const pointers = new Map();
   let pinch = null;
+  let multiTouch = false;   // true mientras dure un gesto con 2+ dedos (no cuenta como tap)
 
   function tileFromClient(cx, cy) {
     const r = $("viewport").getBoundingClientRect();
@@ -297,7 +298,7 @@ const Game = (() => {
       if (e.target.closest("#confirm-bar, #btn-autozoom")) return; // no capturar la UI
       vp.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false });
-      if (pointers.size === 2) startPinch();
+      if (pointers.size >= 2) { multiTouch = true; startPinch(); }
     });
     vp.addEventListener("pointermove", (e) => {
       const p = pointers.get(e.pointerId);
@@ -312,9 +313,11 @@ const Game = (() => {
     });
     const up = (e) => {
       const p = pointers.get(e.pointerId);
-      if (p && pointers.size === 1 && !p.moved) handleTap(e.clientX, e.clientY);
+      if (p && pointers.size === 1 && !p.moved && !multiTouch && e.type === "pointerup")
+        handleTap(e.clientX, e.clientY);
       pointers.delete(e.pointerId);
       if (pointers.size < 2) pinch = null;
+      if (pointers.size === 0) multiTouch = false;
     };
     vp.addEventListener("pointerup", up);
     vp.addEventListener("pointercancel", up);
@@ -598,7 +601,7 @@ const Game = (() => {
   // que el jugador siga viendo la zona de movimiento. Si se pasa `dest`, la
   // barra se ancla en el lado opuesto a la casilla destino.
   function tileScreenY(y) {
-    return viewport().h / 2 + (y - currentPlayer().y) * T * CAM.scale;
+    return CAM.ty + (y * T + T / 2) * CAM.scale;   // posición real en pantalla
   }
 
   function showConfirmBar(html, yes, no, dest) {
@@ -652,15 +655,22 @@ const Game = (() => {
       if (n.dist >= steps) continue;
       for (const [dx, dy] of DIRS4) {
         const nx = n.x + dx, ny = n.y + dy, k = key(nx, ny);
-        if (res.has(k) || !passable(nx, ny)) continue;
+        if (res.has(k) || !walkableCell(nx, ny)) continue;
         if (G.revealed.has(k)) {
-          // casilla revelada: se puede atravesar
+          // casilla revelada: se puede atravesar (si no hay cofre/monstruo)
+          if (!passable(nx, ny)) continue;
           res.set(k, { dist: n.dist + 1, from: key(n.x, n.y), x: nx, y: ny });
           q.push({ x: nx, y: ny, dist: n.dist + 1 });
         } else if (isFrontier(nx, ny)) {
-          // casilla frontera (negra): destino válido que abre la zona,
-          // pero no se puede atravesar (lo desconocido queda más allá)
-          res.set(k, { dist: n.dist + 1, from: key(n.x, n.y), x: nx, y: ny, frontier: true });
+          // casilla frontera (negra): destino válido que abre la zona, pero
+          // no se puede atravesar (lo desconocido queda más allá).
+          // Si hay un cofre o monstruo dormido encima, no se puede pisar:
+          // se marca `blocked` y el jugador se queda en la casilla anterior,
+          // desde donde la zona se abre igualmente.
+          res.set(k, {
+            dist: n.dist + 1, from: key(n.x, n.y), x: nx, y: ny,
+            frontier: true, blocked: !passable(nx, ny)
+          });
         }
       }
     }
@@ -692,7 +702,8 @@ const Game = (() => {
     if (!node || node.dist === 0 || playerAt(x, y)) return;
     // marcar camino, círculo de destino y pedir confirmación (sin oscurecer)
     document.querySelectorAll(".tile.path").forEach(el => el.classList.remove("path"));
-    const path = pathTo(G.moveMap, k);
+    let path = pathTo(G.moveMap, k);
+    if (node.blocked) path = path.slice(0, -1); // no se puede pisar: te quedas delante
     for (const s of path) G.tileEls[s.y][s.x].classList.add("path");
     showDestMarker(x, y);
     setInlineActions([]); // oculta "Parar aquí" mientras se confirma
@@ -707,6 +718,12 @@ const Game = (() => {
     clearHighlights();
     G.moveLeft -= path.length;
     await animateMove(currentPlayer(), path);
+    if (node.blocked) {
+      // casilla negra ocupada: se abre la zona desde la casilla de delante
+      revealFrom(x, y);
+      updateTokens();
+      await promptChests(currentPlayer());
+    }
     // si quedan pasos, puede elegir un nuevo destino (p. ej. zona recién revelada)
     if (G.moveLeft > 0) showMoveOptions();
     else finishMove();
@@ -1219,6 +1236,13 @@ const Game = (() => {
   function init() {
     $("end-restart").onclick = () => location.reload();
     initMenuDrag();
+    // rotación de pantalla / cambio de tamaño: reencuadra la cámara y recoloca el menú
+    window.addEventListener("resize", () => {
+      if (!G || !G.players) return;
+      autoZoom(G.zoomMode, true);
+      G.menuPos = null;
+      if (!$("action-popup").classList.contains("hidden")) positionMenu();
+    });
     // capturar promesas de victoria no gestionadas
     window.addEventListener("unhandledrejection", (e) => {
       if (e.reason && e.reason.gameOver) e.preventDefault();

@@ -66,26 +66,44 @@ html, body {
 .hud-item { display: inline-flex; align-items: center; }
 .hud-item img { width: 30px; height: 30px; filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 .hud-item b { font-size: 13px; margin: 0 4px 0 1px; }
-#btn-zoom { padding: 6px 12px; font-size: 18px; }
 
-#viewport { flex: 1; position: relative; overflow: hidden; background: #0d0b12; }
+#viewport { flex: 1; position: relative; overflow: hidden; background: #0d0b12; touch-action: none; }
+
+/* botón de auto-zoom flotante en la esquina */
+#btn-autozoom {
+  position: absolute; right: 12px; bottom: 12px; z-index: 30;
+  width: 52px; height: 52px; padding: 0; font-size: 24px;
+  border-radius: 50%; background: rgba(42, 36, 54, 0.9);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+}
 #camera { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
 
-/* menú de acciones: popup centrado que oscurece el tablero */
+/* menú de acciones: panel flotante arrastrable (NO oscurece el tablero) */
 #action-popup {
-  z-index: 80;
-  background: rgba(8, 6, 12, 0.55);
+  position: fixed; inset: 0; z-index: 80;
+  pointer-events: none;             /* el tablero sigue siendo interactivo */
 }
-#action-popup-buttons {
-  display: flex; flex-direction: column; gap: 12px;
-  width: min(360px, 82vw);
+#action-card {
+  position: absolute;
+  pointer-events: auto;
+  width: min(320px, 80vw);
   background: #2a2436;
   border: 2px solid #5a4c74;
   border-radius: 18px;
-  padding: 20px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
 }
-#action-popup-buttons .btn { width: 100%; font-size: 19px; padding: 15px; }
+#action-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(#3a3050, #2f2742);
+  border-bottom: 2px solid #5a4c74;
+  cursor: grab; touch-action: none;
+  font-weight: 800; font-size: 18px;
+}
+#action-header img { width: 46px; height: 46px; border-radius: 8px; }
+#action-buttons { display: flex; flex-direction: column; gap: 10px; padding: 14px; }
+#action-buttons .btn { width: 100%; font-size: 18px; padding: 14px; }
 
 /* barra de confirmación anclada, SIN oscurecer el tablero */
 #confirm-bar {
@@ -112,6 +130,28 @@ html, body {
 #confirm-buttons .btn { padding: 10px 22px; }
 
 /* círculo animado sobre la casilla destino que se confirma */
+/* marcador "!" intermitente sobre las casillas negras que abren zonas */
+.frontier-marker {
+  position: absolute; width: 64px; height: 64px; z-index: 4;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 40px; font-weight: 900; color: #ffd24a;
+  text-shadow: 0 2px 4px #000, 0 0 10px rgba(255, 180, 40, 0.85);
+  pointer-events: none;
+  animation: frontierBlink 0.9s infinite ease-in-out;
+}
+.frontier-marker.reach {
+  color: #8effa0;
+  text-shadow: 0 2px 4px #000, 0 0 12px rgba(120, 255, 150, 0.95);
+  /* cuadro verde estable de "casilla alcanzable" (igual que .tile.highlight) */
+  box-shadow: inset 0 0 0 3px rgba(120, 220, 120, 0.9);
+  background: rgba(120, 220, 120, 0.16);
+  animation: none; opacity: 1; transform: none;
+}
+@keyframes frontierBlink {
+  0%, 100% { opacity: 0.35; transform: scale(0.82); }
+  50% { opacity: 1; transform: scale(1.12); }
+}
+
 .dest-marker {
   position: absolute; width: 64px; height: 64px; z-index: 8;
   border-radius: 50%;

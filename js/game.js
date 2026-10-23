@@ -98,14 +98,37 @@ const Game = (() => {
     }
   }
 
-  // Al llegar a una puerta o al borde de una zona, revela la
-  // habitación o pasillo colindante.
-  function revealAdjacentZones(x, y) {
-    for (const [dx, dy] of DIRS4) {
+  // Casilla "frontera": aún no revelada, transitable y colindante con una
+  // casilla revelada. Son las aberturas negras que abren zonas nuevas.
+  function isFrontier(x, y) {
+    if (!inBounds(x, y) || G.revealed.has(key(x, y)) || !walkableCell(x, y)) return false;
+    return DIRS4.some(([dx, dy]) => {
       const nx = x + dx, ny = y + dy;
-      if (!inBounds(nx, ny)) continue;
-      if (cell(nx, ny).t === "wall") continue;
-      if (!G.revealed.has(key(nx, ny))) revealFrom(nx, ny);
+      return inBounds(nx, ny) && G.revealed.has(key(nx, ny)) && walkableCell(nx, ny);
+    });
+  }
+
+  // Coloca marcadores "!" intermitentes sobre las casillas frontera.
+  function updateFrontier() {
+    const layer = $("tokens");
+    layer.querySelectorAll(".frontier-marker").forEach(e => e.remove());
+    if (!G || G.phase === "over") return;
+    const seen = new Set();
+    for (const rk of G.revealed) {
+      const [rx, ry] = rk.split(",").map(Number);
+      if (!walkableCell(rx, ry)) continue;
+      for (const [dx, dy] of DIRS4) {
+        const nx = rx + dx, ny = ry + dy, k = key(nx, ny);
+        if (seen.has(k) || !isFrontier(nx, ny)) continue;
+        seen.add(k);
+        const el = document.createElement("div");
+        el.className = "frontier-marker";
+        el.dataset.k = k;
+        el.style.left = nx * T + "px";
+        el.style.top = ny * T + "px";
+        el.textContent = "!";
+        layer.appendChild(el);
+      }
     }
   }
 
@@ -137,7 +160,6 @@ const Game = (() => {
         G.tileEls[y].push(div);
       }
     }
-    board.onclick = onBoardClick;
     updateTokens();
   }
 
@@ -155,9 +177,10 @@ const Game = (() => {
       if (m.hp > 0 && m.active && G.revealed.has(key(m.x, m.y)))
         wanted.set(m.uid, { img: "token_" + m.type, x: m.x, y: m.y });
 
-    // eliminar los que sobran
+    // eliminar solo las fichas (con uid) que ya no procedan; conserva
+    // marcadores de frontera y de destino
     for (const el of Array.from(layer.children))
-      if (!wanted.has(el.dataset.uid)) el.remove();
+      if (el.dataset.uid && !wanted.has(el.dataset.uid)) el.remove();
 
     for (const [uid, w] of wanted) {
       let el = layer.querySelector(`[data-uid="${uid}"]`);
@@ -173,39 +196,147 @@ const Game = (() => {
       el.classList.toggle("wounded", !!w.wounded);
       el.classList.toggle("active-turn", !!w.active);
     }
+    updateFrontier();
   }
 
   // =========================================================
-  // Cámara
+  // Cámara: pan, pinch-zoom y auto-encuadre por fase
   // =========================================================
+  const CAM = { scale: 1, tx: 0, ty: 0 };
+  const ZOOM_MAX = 2.0;
+
   function viewport() { const v = $("viewport"); return { w: v.clientWidth, h: v.clientHeight }; }
+  function fitScale() { const { w, h } = viewport(); return Math.min(w / (COLS * T), h / (ROWS * T)); }
+  function clampScale(s) { return Math.max(fitScale(), Math.min(ZOOM_MAX, s)); }
+  function turnScale() { return Math.max(fitScale(), Math.min(1.0, ZOOM_MAX)); }
 
-  function focusTile(x, y, instant = false) {
-    if (G.zoomedOut) return;
+  function clampPan() {
     const { w, h } = viewport();
-    const scale = G.camScale;
-    let tx = w / 2 - (x * T + T / 2) * scale;
-    let ty = h / 2 - (y * T + T / 2) * scale;
-    applyCam(tx, ty, scale, instant);
+    const bw = COLS * T * CAM.scale, bh = ROWS * T * CAM.scale;
+    CAM.tx = bw <= w ? (w - bw) / 2 : Math.max(w - bw, Math.min(0, CAM.tx));
+    CAM.ty = bh <= h ? (h - bh) / 2 : Math.max(h - bh, Math.min(0, CAM.ty));
   }
 
-  function zoomFit() {
-    const { w, h } = viewport();
-    const scale = Math.min(w / (COLS * T), h / (ROWS * T));
-    applyCam((w - COLS * T * scale) / 2, (h - ROWS * T * scale) / 2, scale);
-  }
-
-  function applyCam(tx, ty, scale, instant = false) {
+  function camApply(instant) {
+    clampPan();
     const cam = $("camera");
-    cam.style.transition = instant ? "none" : "transform 0.5s ease";
-    cam.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    cam.style.transition = instant ? "none" : "transform 0.55s ease";
+    cam.style.transform = `translate(${CAM.tx}px, ${CAM.ty}px) scale(${CAM.scale})`;
   }
 
-  function toggleZoom() {
-    G.zoomedOut = !G.zoomedOut;
-    $("btn-zoom").textContent = G.zoomedOut ? "🔍+" : "🗺️";
-    if (G.zoomedOut) zoomFit();
-    else { const p = currentPlayer(); focusTile(p.x, p.y); }
+  // centra un punto del tablero (px de tablero); si scale es null conserva el zoom
+  function camCenterOn(px, py, scale, instant) {
+    if (scale != null) CAM.scale = clampScale(scale);
+    const { w, h } = viewport();
+    CAM.tx = w / 2 - px * CAM.scale;
+    CAM.ty = h / 2 - py * CAM.scale;
+    camApply(instant);
+  }
+
+  // sigue una casilla sin cambiar el nivel de zoom (animaciones de movimiento)
+  function focusTile(x, y, instant = false) {
+    camCenterOn(x * T + T / 2, y * T + T / 2, null, instant);
+  }
+
+  // encuadra una caja de casillas + margen (en casillas)
+  function camFitBounds(minx, miny, maxx, maxy, margin, instant) {
+    const { w, h } = viewport();
+    const scale = clampScale(Math.min(
+      w / ((maxx - minx + 1 + margin * 2) * T),
+      h / ((maxy - miny + 1 + margin * 2) * T)));
+    camCenterOn((minx + maxx + 1) / 2 * T, (miny + maxy + 1) / 2 * T, scale, instant);
+  }
+
+  function combatRoom() {
+    const f = G.combatFocus || currentPlayer();
+    const c = cell(f.x, f.y);
+    return c && (c.t === "room" || c.t === "exit") ? G.dungeon.rooms[c.room] : null;
+  }
+
+  // Auto-encuadre según la fase; transición suave salvo instant=true
+  function autoZoom(mode, instant = false) {
+    if (mode) G.zoomMode = mode;
+    const p = currentPlayer();
+    if (G.zoomMode === "move" && G.moveMap) {
+      let minx = p.x, miny = p.y, maxx = p.x, maxy = p.y;
+      for (const [, n] of G.moveMap) {
+        minx = Math.min(minx, n.x); miny = Math.min(miny, n.y);
+        maxx = Math.max(maxx, n.x); maxy = Math.max(maxy, n.y);
+      }
+      camFitBounds(minx, miny, maxx, maxy, 1, instant);          // todas las casillas + 1 extra
+    } else if (G.zoomMode === "combat" && combatRoom()) {
+      const r = combatRoom();
+      camFitBounds(r.x, r.y, r.x + r.w - 1, r.y + r.h - 1, 1, instant); // sala + 1 bloque de margen
+    } else {
+      camCenterOn(p.x * T + T / 2, p.y * T + T / 2, turnScale(), instant); // resto: zoom por defecto
+    }
+  }
+
+  // ---- gestos: pinch-zoom + arrastre del tablero + tap sobre casilla ----
+  const pointers = new Map();
+  let pinch = null;
+
+  function tileFromClient(cx, cy) {
+    const r = $("viewport").getBoundingClientRect();
+    const bx = (cx - r.left - CAM.tx) / CAM.scale, by = (cy - r.top - CAM.ty) / CAM.scale;
+    const tx = Math.floor(bx / T), ty = Math.floor(by / T);
+    return (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) ? null : { x: tx, y: ty };
+  }
+
+  function handleTap(cx, cy) {
+    if (G.confirming) return;
+    const t = tileFromClient(cx, cy);
+    if (!t) return;
+    if (G.targetCb) { G.targetCb(t.x, t.y); return; }
+    if (G.moveMap) onMoveTileTap(t.x, t.y);
+  }
+
+  function camInitGestures() {
+    const vp = $("viewport");
+    vp.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("#confirm-bar, #btn-autozoom")) return; // no capturar la UI
+      vp.setPointerCapture(e.pointerId);
+      pointers.set(e.pointerId, { x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, moved: false });
+      if (pointers.size === 2) startPinch();
+    });
+    vp.addEventListener("pointermove", (e) => {
+      const p = pointers.get(e.pointerId);
+      if (!p) return;
+      const dx = e.clientX - p.x, dy = e.clientY - p.y;
+      p.x = e.clientX; p.y = e.clientY;
+      if (pointers.size === 2 && pinch) { updatePinch(); return; }
+      if (pointers.size === 1) {
+        if (!p.moved && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) > 8) p.moved = true;
+        if (p.moved) { CAM.tx += dx; CAM.ty += dy; camApply(true); }
+      }
+    });
+    const up = (e) => {
+      const p = pointers.get(e.pointerId);
+      if (p && pointers.size === 1 && !p.moved) handleTap(e.clientX, e.clientY);
+      pointers.delete(e.pointerId);
+      if (pointers.size < 2) pinch = null;
+    };
+    vp.addEventListener("pointerup", up);
+    vp.addEventListener("pointercancel", up);
+  }
+
+  function startPinch() {
+    const [a, b] = [...pointers.values()];
+    const r = $("viewport").getBoundingClientRect();
+    const midX = (a.x + b.x) / 2 - r.left, midY = (a.y + b.y) / 2 - r.top;
+    pinch = {
+      dist: Math.hypot(a.x - b.x, a.y - b.y), scale: CAM.scale,
+      bpx: (midX - CAM.tx) / CAM.scale, bpy: (midY - CAM.ty) / CAM.scale
+    };
+  }
+  function updatePinch() {
+    const [a, b] = [...pointers.values()];
+    const r = $("viewport").getBoundingClientRect();
+    const midX = (a.x + b.x) / 2 - r.left, midY = (a.y + b.y) / 2 - r.top;
+    CAM.scale = clampScale(pinch.scale * Math.hypot(a.x - b.x, a.y - b.y) / pinch.dist);
+    CAM.tx = midX - pinch.bpx * CAM.scale;   // mantiene el punto bajo los dedos
+    CAM.ty = midY - pinch.bpy * CAM.scale;
+    camApply(true);
   }
 
   // =========================================================
@@ -390,12 +521,15 @@ const Game = (() => {
     return dmg === 1 ? "item_pergamino" : "item_pergamino2";
   }
 
-  // Menú de acciones: popup CENTRADO que oscurece el tablero, para que el
-  // jugador se dé cuenta de que debe elegir.
+  // Menú de acciones: panel flotante (NO oscurece el tablero) con el retrato
+  // del personaje activo en la cabecera; se puede arrastrar por la pantalla.
   function showActionMenu(buttons) {
     setInlineActions([]);              // limpia la barra inferior
     $("confirm-bar").classList.add("hidden");
-    const box = $("action-popup-buttons");
+    const p = currentPlayer();
+    $("action-portrait").src = "img/" + I18N.portrait(p.classId) + ".png";
+    $("action-title").textContent = p.nombre;
+    const box = $("action-buttons");
     box.innerHTML = "";
     for (const b of buttons) {
       const el = document.createElement("button");
@@ -405,9 +539,45 @@ const Game = (() => {
       box.appendChild(el);
     }
     $("action-popup").classList.remove("hidden");
+    positionMenu();
   }
 
   function hideActionMenu() { $("action-popup").classList.add("hidden"); }
+
+  // coloca el panel (posición recordada o por defecto: centrado-inferior)
+  function positionMenu() {
+    const card = $("action-card");
+    if (G && G.menuPos) {
+      card.style.left = G.menuPos.left + "px";
+      card.style.top = G.menuPos.top + "px";
+      return;
+    }
+    const cw = card.offsetWidth || 300, ch = card.offsetHeight || 260;
+    card.style.left = Math.max(8, (window.innerWidth - cw) / 2) + "px";
+    card.style.top = Math.max(60, window.innerHeight * 0.52 - ch / 2) + "px";
+  }
+
+  // arrastre del panel sujetando la cabecera
+  function initMenuDrag() {
+    const header = $("action-header"), card = $("action-card");
+    let start = null;
+    header.addEventListener("pointerdown", (e) => {
+      header.setPointerCapture(e.pointerId);
+      const r = card.getBoundingClientRect();
+      start = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+      header.style.cursor = "grabbing";
+    });
+    header.addEventListener("pointermove", (e) => {
+      if (!start) return;
+      let left = Math.max(4, Math.min(window.innerWidth - card.offsetWidth - 4, e.clientX - start.dx));
+      let top = Math.max(4, Math.min(window.innerHeight - card.offsetHeight - 4, e.clientY - start.dy));
+      card.style.left = left + "px"; card.style.top = top + "px";
+      G.menuPos = { left, top };
+    });
+    const end = () => { start = null; header.style.cursor = "grab"; };
+    header.addEventListener("pointerup", end);
+    header.addEventListener("pointercancel", end);
+  }
 
   // Controles en línea (barra inferior) que NO oscurecen el tablero: se usan
   // cuando el jugador está interactuando con el tablero (elegir casilla/objetivo).
@@ -428,7 +598,7 @@ const Game = (() => {
   // que el jugador siga viendo la zona de movimiento. Si se pasa `dest`, la
   // barra se ancla en el lado opuesto a la casilla destino.
   function tileScreenY(y) {
-    return viewport().h / 2 + (y - currentPlayer().y) * T * G.camScale;
+    return viewport().h / 2 + (y - currentPlayer().y) * T * CAM.scale;
   }
 
   function showConfirmBar(html, yes, no, dest) {
@@ -482,11 +652,15 @@ const Game = (() => {
       if (n.dist >= steps) continue;
       for (const [dx, dy] of DIRS4) {
         const nx = n.x + dx, ny = n.y + dy, k = key(nx, ny);
-        // solo por casillas ya reveladas (las zonas nuevas se revelan al
-        // llegar al borde y se puede seguir con los pasos restantes)
-        if (!res.has(k) && passable(nx, ny) && G.revealed.has(k)) {
+        if (res.has(k) || !passable(nx, ny)) continue;
+        if (G.revealed.has(k)) {
+          // casilla revelada: se puede atravesar
           res.set(k, { dist: n.dist + 1, from: key(n.x, n.y), x: nx, y: ny });
           q.push({ x: nx, y: ny, dist: n.dist + 1 });
+        } else if (isFrontier(nx, ny)) {
+          // casilla frontera (negra): destino válido que abre la zona,
+          // pero no se puede atravesar (lo desconocido queda más allá)
+          res.set(k, { dist: n.dist + 1, from: key(n.x, n.y), x: nx, y: ny, frontier: true });
         }
       }
     }
@@ -506,17 +680,10 @@ const Game = (() => {
   function clearHighlights() {
     document.querySelectorAll(".tile.highlight, .tile.path, .tile.target")
       .forEach(el => el.classList.remove("highlight", "path", "target"));
+    document.querySelectorAll(".frontier-marker.reach")
+      .forEach(el => el.classList.remove("reach"));
     G.moveMap = null;
     G.targetCb = null;
-  }
-
-  function onBoardClick(e) {
-    if (G.confirming) return; // ignorar taps mientras hay una confirmación abierta
-    const tileEl = e.target.closest(".tile");
-    if (!tileEl) return;
-    const x = +tileEl.dataset.x, y = +tileEl.dataset.y;
-    if (G.targetCb) { G.targetCb(x, y); return; }
-    if (G.moveMap) onMoveTileTap(x, y);
   }
 
   async function onMoveTileTap(x, y) {
@@ -548,8 +715,7 @@ const Game = (() => {
   async function animateMove(p, path) {
     for (const step of path) {
       p.x = step.x; p.y = step.y;
-      revealFrom(p.x, p.y);
-      revealAdjacentZones(p.x, p.y);
+      revealFrom(p.x, p.y);   // pisar una casilla frontera abre su zona
       updateTokens();
       focusTile(p.x, p.y);
       await sleep(220);
@@ -622,6 +788,8 @@ const Game = (() => {
   // Combate
   // =========================================================
   async function playerAttack(p, m) {
+    G.combatFocus = { x: p.x, y: p.y };
+    autoZoom("combat");
     const att = combatantOf("player", p), def = combatantOf("monster", m);
     const dmg = await runCombat({
       att, def, dados: p.dados,
@@ -643,7 +811,8 @@ const Game = (() => {
   }
 
   async function monsterAttack(m, p) {
-    focusTile(p.x, p.y);
+    G.combatFocus = { x: p.x, y: p.y };
+    autoZoom("combat");
     const att = combatantOf("monster", m), def = combatantOf("player", p);
     const dmg = await runCombat({
       att, def, dados: DATA.MONSTERS[m.type].dados, auto: true,
@@ -753,9 +922,7 @@ const Game = (() => {
     const p = currentPlayer();
     updateHud();
     updateTokens();
-    G.zoomedOut = false;
-    $("btn-zoom").textContent = "🗺️";
-    focusTile(p.x, p.y);
+    autoZoom("turn");
     await showMessage(`<img class="msg-portrait" src="img/${I18N.portrait(p.classId)}.png"><br>` +
       I18N.t("turnOf", { name: p.nombre }), I18N.t("start"));
     G.hasMoved = false;
@@ -797,9 +964,14 @@ const Game = (() => {
     G.moveMap = reachable(p.x, p.y, G.moveLeft);
     let any = false;
     for (const [, node] of G.moveMap) {
-      if (node.dist > 0 && !playerAt(node.x, node.y)) {
+      if (node.dist === 0 || playerAt(node.x, node.y)) continue;
+      any = true;
+      if (node.frontier) {
+        // casilla negra alcanzable: resalta su marcador "!" en verde
+        const m = $("tokens").querySelector(`.frontier-marker[data-k="${node.x},${node.y}"]`);
+        if (m) m.classList.add("reach");
+      } else {
         G.tileEls[node.y][node.x].classList.add("highlight");
-        any = true;
       }
     }
     if (!any) {
@@ -809,6 +981,7 @@ const Game = (() => {
       return;
     }
     G.movedAny = true;
+    autoZoom("move");   // encuadra todas las casillas alcanzables + 1 extra
     setInlineActions([{ label: I18N.t("stopHereBtn", { n: G.moveLeft }), cb: finishMove }]);
   }
 
@@ -1028,15 +1201,16 @@ const Game = (() => {
       turnIdx: 0, phase: "players",
       hasMoved: false, hasAttacked: false, moveLeft: 0, movedAny: false,
       moveMap: null, targetCb: null, promptedChests: new Set(), confirming: false,
-      zoomedOut: false, camScale: 1, tileEls: []
+      zoomMode: "turn", combatFocus: null, menuPos: null, tileEls: []
     };
 
     buildBoard();
     revealRoom(dungeon.startRoom.id);
     updateTokens();
     $("game-ui").classList.remove("hidden");
-    $("btn-zoom").onclick = toggleZoom;
-    focusTile(players[0].x, players[0].y, true);
+    $("btn-autozoom").onclick = () => autoZoom(G.zoomMode);
+    camInitGestures();
+    camCenterOn(players[0].x * T + T / 2, players[0].y * T + T / 2, turnScale(), true);
     startPlayerTurn().catch(handleEnd);
   }
 
@@ -1044,6 +1218,7 @@ const Game = (() => {
 
   function init() {
     $("end-restart").onclick = () => location.reload();
+    initMenuDrag();
     // capturar promesas de victoria no gestionadas
     window.addEventListener("unhandledrejection", (e) => {
       if (e.reason && e.reason.gameOver) e.preventDefault();

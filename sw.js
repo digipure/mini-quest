@@ -1,5 +1,5 @@
 // Mini-Quest - Service Worker (cache offline)
-const CACHE = "mini-quest-v9";
+const CACHE = "mini-quest-v12";
 
 const ASSETS = [
   "./",

@@ -27,7 +27,6 @@
       <span id="hud-hp"></span>
       <span id="hud-gold"></span>
       <span id="hud-items"></span>
-      <button id="btn-zoom" class="btn">🗺️</button>
     </div>
     <div id="viewport">
       <div id="camera">
@@ -41,13 +40,21 @@
           <div id="confirm-buttons"></div>
         </div>
       </div>
+      <!-- Botón de auto-zoom (esquina) -->
+      <button id="btn-autozoom" class="btn" aria-label="Auto-zoom">🎯</button>
     </div>
     <div id="actions"></div>
   </div>
 
-  <!-- Menú de acciones (popup centrado) -->
-  <div id="action-popup" class="overlay hidden">
-    <div id="action-popup-buttons"></div>
+  <!-- Menú de acciones (panel flotante arrastrable, no oscurece) -->
+  <div id="action-popup" class="hidden">
+    <div id="action-card">
+      <div id="action-header">
+        <img id="action-portrait" src="" alt="">
+        <span id="action-title"></span>
+      </div>
+      <div id="action-buttons"></div>
+    </div>
   </div>
 
   <!-- Mensajes / confirmaciones -->
